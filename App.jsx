@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createRoot } from 'react-dom/client';
 import { initializeApp } from "firebase/app";
 import { getFirestore } from 'firebase/firestore';
 
@@ -487,4 +488,7 @@ Finally, the integration of artificial intelligence and machine learning into ev
     </div>
   );
 };
-export default App;
+
+const container = document.getElementById('root');
+const root = createRoot(container);
+root.render(<App />);
