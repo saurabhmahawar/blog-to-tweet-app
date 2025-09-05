@@ -103,9 +103,11 @@ async function callImagenAPI(imagePrompt, apiKey) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
+    // Log the full response body for better debugging
     const result = await response.json();
     if (!response.ok || !result.predictions || result.predictions.length === 0 || !result.predictions[0].bytesBase64Encoded) {
-        throw new Error("Imagen API call failed.");
+        console.error("Imagen API raw error response:", result); // Log the raw error here
+        throw new Error("Imagen API call failed. Check server logs for details.");
     }
     return `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
 }
