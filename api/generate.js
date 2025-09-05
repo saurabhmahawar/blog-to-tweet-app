@@ -44,20 +44,10 @@ export default async function handler(req, res) {
             responseData = { text: apiResponse.text };
 
         } else if (task === 'image') {
-            const imageSystemPrompt = `
-                You are a professional image generation prompt writer for a powerful AI. 
-                Your task is to create a single, highly detailed, and creative prompt for a high-quality, cinematic digital art scene. 
-                The prompt must describe a visually captivating conceptual image with vibrant colors, rich textures, and dramatic lighting that represents the core themes and ideas of the provided text.
-                The scene should not contain any text, logos, or identifiable human faces.
-                Focus on abstract and thematic elements that evoke a feeling or concept.
-                The prompt should be concise and focused on a single visual idea.
-            `;
-            const imageUserQuery = `Create a high-quality cinematic image prompt based on the following content: "${content}"`;
+            // Using the Gemini Flash Image Preview model for image generation
+            const imageUserQuery = `Create a visually compelling digital art image based on the following text: "${content}"`;
             
-            const promptTextResponse = await callGeminiAPI(imageUserQuery, imageSystemPrompt, GEMINI_API_KEY);
-            const promptText = promptTextResponse.text;
-            
-            const imageUrl = await callImagenAPI(promptText, GEMINI_API_KEY);
+            const imageUrl = await callGeminiImageAPI(imageUserQuery, GEMINI_API_KEY);
             responseData = { imageUrl: imageUrl };
         } else {
             return res.status(400).json({ error: "Invalid task specified." });
@@ -92,22 +82,26 @@ async function callGeminiAPI(userPrompt, systemPrompt, apiKey, useSearch = false
     return { text: result.candidates[0].content.parts[0].text };
 }
 
-async function callImagenAPI(imagePrompt, apiKey) {
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+async function callGeminiImageAPI(prompt, apiKey) {
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`;
     const payload = {
-        instances: { prompt: imagePrompt },
-        parameters: { "sampleCount": 1 }
+        contents: [{
+            parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+            responseModalities: ['TEXT', 'IMAGE']
+        },
     };
     const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
-    // Log the full response body for better debugging
     const result = await response.json();
-    if (!response.ok || !result.predictions || result.predictions.length === 0 || !result.predictions[0].bytesBase64Encoded) {
-        console.error("Imagen API raw error response:", result); // Log the raw error here
-        throw new Error("Imagen API call failed. Check server logs for details.");
+    const base64Data = result?.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+    if (!base64Data) {
+        console.error("Gemini Image API raw error response:", result);
+        throw new Error("Gemini Image API call failed. Check server logs for details.");
     }
-    return `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+    return `data:image/png;base64,${base64Data}`;
 }
