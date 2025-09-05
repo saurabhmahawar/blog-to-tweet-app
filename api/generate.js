@@ -1,4 +1,5 @@
-// This file runs on the server, so it can securely access environment variables.
+// generate.js - Server-side API route for Vercel
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         res.setHeader('Allow', ['POST']);
@@ -59,13 +60,18 @@ export default async function handler(req, res) {
             responseData = { text: apiResponse.text };
 
         } else if (task === 'image') {
-            // Generate image based on entire blog content
+            // Generate image based on content
             if (!HF_API_KEY) {
                 return res.status(500).json({ error: "Hugging Face API key is not configured." });
             }
 
-            const imageUrl = await callHuggingFaceImageAPI(content, HF_API_KEY);
-            responseData = { imageUrl: imageUrl };
+            try {
+                const imageUrl = await callHuggingFaceImageAPI(content, HF_API_KEY);
+                responseData = { imageUrl };
+            } catch (err) {
+                console.error("HF API call failed:", err);
+                return res.status(500).json({ error: "Hugging Face image generation failed." });
+            }
 
         } else {
             return res.status(400).json({ error: "Invalid task specified." });
@@ -129,7 +135,10 @@ async function callHuggingFaceImageAPI(prompt, hfApiKey) {
             "Authorization": `Bearer ${hfApiKey}`,
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({ inputs: prompt })
+        body: JSON.stringify({
+            inputs: prompt,
+            options: { wait_for_model: true }
+        })
     });
 
     if (!response.ok) {
@@ -138,10 +147,8 @@ async function callHuggingFaceImageAPI(prompt, hfApiKey) {
         throw new Error("Hugging Face image API failed");
     }
 
-    // HF returns binary image data
     const arrayBuffer = await response.arrayBuffer();
     const base64Image = Buffer.from(arrayBuffer).toString("base64");
 
-    // Return as a data URI for frontend <img src="...">
     return `data:image/png;base64,${base64Image}`;
 }
