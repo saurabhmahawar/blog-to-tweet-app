@@ -17,10 +17,26 @@ export default async function handler(req, res) {
         let responseData = {};
 
         if (task === 'content') {
-            const contentSystemPrompt = "You are a web content analyzer. Find the full, main body text of the given URL. Return only the main content as a single block of text.";
-            const contentUserQuery = `Find and summarize the core content from this URL: ${url}`;
-            const apiResponse = await callGeminiAPI(contentUserQuery, contentSystemPrompt, GEMINI_API_KEY, true);
-            responseData = { text: apiResponse.text };
+            let extractedContent = '';
+            
+            // First attempt: use a very specific prompt to get clean content
+            const specificPrompt = `Find the full, main body text of the given URL. Return only the main content as a single block of text. If you cannot find the content, return a single phrase: 'Content not found'. URL: ${url}`;
+            const specificResponse = await callGeminiAPI(specificPrompt, "", GEMINI_API_KEY, true);
+            
+            if (specificResponse.text.trim() === 'Content not found' || specificResponse.text.trim().length < 100) {
+                // Second attempt: broaden the search if the first attempt fails
+                const broadPrompt = `Analyze the URL and summarize the core content. Return a concise, but comprehensive summary of the article. URL: ${url}`;
+                const broadResponse = await callGeminiAPI(broadPrompt, "", GEMINI_API_KEY, true);
+                
+                if (broadResponse.text.trim().length < 100) {
+                    return res.status(404).json({ error: "Could not find content from the provided URL. Please try pasting the content manually." });
+                }
+                extractedContent = broadResponse.text;
+            } else {
+                extractedContent = specificResponse.text;
+            }
+            
+            responseData = { text: extractedContent };
 
         } else if (task === 'thread') {
             const threadSystemPrompt = `
@@ -75,10 +91,31 @@ async function callGeminiAPI(userPrompt, systemPrompt, apiKey, useSearch = false
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
-    const result = await response.json();
-    if (!response.ok || !result.candidates?.[0]?.content?.parts?.[0]?.text) {
-        throw new Error("Gemini API call failed.");
+    
+    // Attempt to read the response body as JSON
+    let result;
+    try {
+        result = await response.json();
+    } catch (e) {
+        // If it fails, log the raw text and throw
+        const textResult = await response.text();
+        console.error("API response was not valid JSON. Raw text:", textResult);
+        throw new Error("Gemini API call failed. Received a non-JSON response.");
     }
+    
+    // Check for general API errors
+    if (!response.ok) {
+        console.error("API call failed with status", response.status, ". Response:", result);
+        const errorMessage = result.error?.message || `API request failed with status: ${response.status}`;
+        throw new Error(errorMessage);
+    }
+    
+    // Check for missing content
+    if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
+        console.error("API response missing expected content. Response:", result);
+        throw new Error("Gemini API call failed: No content returned.");
+    }
+    
     return { text: result.candidates[0].content.parts[0].text };
 }
 
