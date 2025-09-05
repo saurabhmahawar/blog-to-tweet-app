@@ -371,7 +371,7 @@
                             imageContainer.classList.remove('hidden');
                         } catch (error) {
                             console.error("Error generating image:", error);
-                            showMessage("Image generation failed. Please try again later.");
+                            showMessage("Image generation failed: " + error.message);
                         } finally {
                             imageLoadingText.classList.add('hidden');
                         }
