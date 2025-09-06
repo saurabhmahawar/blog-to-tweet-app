@@ -123,13 +123,11 @@ async function callPerplexityImageAPI(prompt, pplxApiKey) {
         let error;
         try {
             error = await response.json();
-            console.error("Perplexity API error:", error);
-            throw new Error(error.message || "Perplexity image API failed");
         } catch (e) {
-            error = await response.text();
-            console.error("Perplexity API raw text error:", error);
-            throw new Error(`Perplexity image API failed with status ${response.status}. Raw response: ${error}`);
+            error = { message: await response.text() };
         }
+        console.error("Perplexity API error:", error);
+        throw new Error(error.message || "Perplexity image API failed");
     }
 
     const result = await response.json();
