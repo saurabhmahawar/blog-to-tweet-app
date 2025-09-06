@@ -21,25 +21,27 @@ export default async function handler(req, res) {
         const { task, url, content, tweetCount, imagePrompt } = req.body;
         let responseData = {};
 
-        if (task === 'content') {
-            // Extract content from URL
-            let extractedContent = '';
-            const specificPrompt = `Find the full, main body text of the given URL. Return only the main content as a single block of text. If you cannot find the content, return a single phrase: 'Content not found'. URL: ${url}`;
-            const specificResponse = await callGeminiAPI(specificPrompt, "", GEMINI_API_KEY, true);
+        // --- CHANGE IS HERE ---
+        if (task === 'content' || task === 'thread') {
+            // Extract content from URL or use provided content
+            let extractedContent = content;
+            if (url) {
+                const specificPrompt = `Find the full, main body text of the given URL. Return only the main content as a single block of text. If you cannot find the content, return a single phrase: 'Content not found'. URL: ${url}`;
+                const specificResponse = await callGeminiAPI(specificPrompt, "", GEMINI_API_KEY, true);
 
-            if (specificResponse.text.trim() === 'Content not found' || specificResponse.text.trim().length < 100) {
-                const broadPrompt = `Analyze the URL and summarize the core content. Return a concise, but comprehensive summary of the article. URL: ${url}`;
-                const broadResponse = await callGeminiAPI(broadPrompt, "", GEMINI_API_KEY, true);
-
-                if (broadResponse.text.trim().length < 100) {
-                    throw new Error("Could not extract enough content from the URL.");
+                if (specificResponse.text.trim() === 'Content not found' || specificResponse.text.trim().length < 100) {
+                    const broadPrompt = `Analyze the URL and summarize the core content. Return a concise, but comprehensive summary of the article. URL: ${url}`;
+                    const broadResponse = await callGeminiAPI(broadPrompt, "", GEMINI_API_KEY, true);
+                    if (broadResponse.text.trim().length < 100) {
+                        throw new Error("Could not extract enough content from the URL.");
+                    }
+                    extractedContent = broadResponse.text;
+                } else {
+                    extractedContent = specificResponse.text;
                 }
-                extractedContent = broadResponse.text;
-            } else {
-                extractedContent = specificResponse.text;
             }
             
-            // Now generate the thread based on the extracted content
+            // Now generate the thread based on the extracted or provided content
             const prompt = `Convert the following blog post content into a cohesive and engaging Twitter thread of exactly ${tweetCount} tweets. The thread should be numbered and each tweet should be formatted as a JSON object with a 'text' property. Do not include any other text or explanation. Blog post content: ${extractedContent}`;
             const threadResponse = await callGeminiAPI(prompt, "application/json", GEMINI_API_KEY);
             responseData = threadResponse;
