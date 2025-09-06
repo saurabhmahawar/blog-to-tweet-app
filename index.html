@@ -120,8 +120,8 @@
 
     <div class="bg-white p-8 md:p-10 rounded-3xl shadow-xl max-w-4xl w-full">
         <div class="text-center mb-8">
-            <h1 class="text-4xl md:text-5xl font-bold text-gray-800">Blog → Thread Converter ❤️</h1>
-            <p class="text-gray-500 mt-2">Transform your blog posts into engaging Twitter threads 𝕏 🧵</p>
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-800">Blog → Thread Converter</h1>
+            <p class="text-gray-500 mt-2">Transform your blog posts into engaging Twitter threads.</p>
         </div>
 
         <div id="input-section" class="space-y-6">
@@ -152,7 +152,7 @@
             </div>
 
             <div class="mt-4 flex items-center justify-between">
-                <label for="image-toggle" class="text-sm font-semibold text-gray-700 cursor-pointer">Need an Image for the tweet?</label>
+                <label for="image-toggle" class="text-sm font-semibold text-gray-700 cursor-pointer">Generate an image for the first tweet?</label>
                 <div class="relative inline-flex items-center">
                     <input type="checkbox" name="image-toggle" id="image-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition duration-200">
                     <label for="image-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
@@ -185,7 +185,8 @@
             </div>
 
             <div id="tweet-container" class="space-y-4">
-                </div>
+                <!-- Tweets will be dynamically inserted here -->
+            </div>
             
             <div class="mt-6 flex flex-col md:flex-row justify-center space-y-4 md:space-y-0 md:space-x-4">
                 <button id="copy-all-btn" class="py-3 px-6 bg-teal-700 hover:bg-teal-800 text-white font-semibold rounded-xl shadow-lg transition duration-200 ease-in-out">
@@ -194,6 +195,7 @@
             </div>
         </div>
         
+        <!-- Custom Message Box for alerts -->
         <div id="message-box" class="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white p-4 rounded-full shadow-lg transition-opacity duration-300 z-50 invisible opacity-0">
             <p id="message-text" class="text-sm font-medium"></p>
         </div>
@@ -236,6 +238,7 @@
 
             // Function to generate content via the Serverless Function
             async function generateContent(payload) {
+                // IMPORTANT: This now calls our own Serverless Function, not the Gemini API directly.
                 const response = await fetch('/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -250,12 +253,14 @@
                 return await response.json();
             }
 
+
             // Update slider color
             function updateSliderColor() {
                 const value = (tweetCountInput.value - tweetCountInput.min) / (tweetCountInput.max - tweetCountInput.min) * 100;
                 tweetCountInput.style.setProperty('--slider-progress', `${value}%`);
             }
             updateSliderColor();
+
 
             tweetCountInput.addEventListener('input', (event) => {
                 tweetCountDisplay.textContent = event.target.value;
@@ -285,6 +290,7 @@
                     loadingIndicator.classList.add('hidden');
                 }
             }
+
 
             convertBtn.addEventListener('click', async () => {
                 const blogText = textInput.value.trim();
@@ -326,37 +332,38 @@
                         contentToProcess = contentResponse.text;
                     }
 
+                    // Start thread generation
                     setButtonLoadingState(true, 'Generating your thread...');
+
                     const threadPayload = {
                         task: 'thread',
                         content: contentToProcess,
                         tweetCount: tweetCount,
                     };
+                    
                     const threadResponse = await generateContent(threadPayload);
+                    let tweets = threadResponse.text.split('\n\n').map(t => t.trim()).filter(t => t.length > 0);
                     
-                    let tweets;
-                    try {
-                        const parsedResponse = JSON.parse(threadResponse.text);
-                        tweets = parsedResponse.map(tweet => tweet.text);
-                    } catch (e) {
-                        console.error("Failed to parse JSON from thread response. Using raw text.");
-                        showMessage("Warning: Thread formatting may be incorrect. Failed to parse JSON.");
-                        tweets = threadResponse.text.split('\n').filter(t => t.trim().length > 0);
-                    }
-                    
-                    if (tweets.length > tweetCount) {
+                    // Fallback to manually add numbering if the model failed to
+                    tweets = tweets.map((tweet, index) => {
+                        if (!tweet.startsWith(`${index + 1}/${tweetCount}`)) {
+                            return `${index + 1}/${tweetCount} ${tweet}`;
+                        }
+                        return tweet;
+                    });
+
+                    if (tweets.length !== tweetCount) {
+                        showMessage(`Generated thread has ${tweets.length} tweets instead of the requested ${tweetCount}. Truncating to ${tweetCount}.`);
                         tweets = tweets.slice(0, tweetCount);
                     }
-                    
-                    // Handle image generation
+
+                    // Handle image generation if toggled
                     if (shouldGenerateImage) {
                         imageLoadingText.classList.remove('hidden');
                         try {
-                            const imagePrompt = tweets[0].substring(0, 500); 
-                            
                             const imagePayload = {
                                 task: 'image',
-                                imagePrompt: imagePrompt,
+                                content: contentToProcess,
                             };
                             const imageResponse = await generateContent(imagePayload);
                             generatedImage.src = imageResponse.imageUrl;
@@ -377,7 +384,7 @@
                         tweetCard.className = 'tweet-card p-4 rounded-xl bg-white shadow-md border border-gray-200 flex flex-col justify-between';
                         tweetCard.setAttribute('contenteditable', 'true');
                         tweetCard.innerHTML = `
-                            <p class="text-gray-800">${index + 1}/${tweets.length} ${tweet}</p>
+                            <p class="text-gray-800">${tweet}</p>
                             <button class="copy-tweet-btn mt-4 ml-auto py-2 px-4 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-xs font-semibold transition duration-200">Copy Tweet</button>
                         `;
                         tweetContainer.appendChild(tweetCard);
