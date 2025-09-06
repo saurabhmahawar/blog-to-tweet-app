@@ -21,35 +21,32 @@ export default async function handler(req, res) {
         const { task, url, content, tweetCount, imagePrompt } = req.body;
         let responseData = {};
 
-        // --- CHANGE IS HERE ---
-        if (task === 'content' || task === 'thread') {
-            // Extract content from URL or use provided content
-            let extractedContent = content;
-            if (url) {
-                const specificPrompt = `Find the full, main body text of the given URL. Return only the main content as a single block of text. If you cannot find the content, return a single phrase: 'Content not found'. URL: ${url}`;
-                const specificResponse = await callGeminiAPI(specificPrompt, "", GEMINI_API_KEY, true);
+        if (task === 'content') {
+            let extractedContent = '';
+            const specificPrompt = `Find the full, main body text of the given URL. Return only the main content as a single block of text. If you cannot find the content, return a single phrase: 'Content not found'. URL: ${url}`;
+            const specificResponse = await callGeminiAPI(specificPrompt, "", GEMINI_API_KEY, true);
 
-                if (specificResponse.text.trim() === 'Content not found' || specificResponse.text.trim().length < 100) {
-                    const broadPrompt = `Analyze the URL and summarize the core content. Return a concise, but comprehensive summary of the article. URL: ${url}`;
-                    const broadResponse = await callGeminiAPI(broadPrompt, "", GEMINI_API_KEY, true);
-                    if (broadResponse.text.trim().length < 100) {
-                        throw new Error("Could not extract enough content from the URL.");
-                    }
-                    extractedContent = broadResponse.text;
-                } else {
-                    extractedContent = specificResponse.text;
+            if (specificResponse.text.trim() === 'Content not found' || specificResponse.text.trim().length < 100) {
+                const broadPrompt = `Analyze the URL and summarize the core content. Return a concise, but comprehensive summary of the article. URL: ${url}`;
+                const broadResponse = await callGeminiAPI(broadPrompt, "", GEMINI_API_KEY, true);
+                if (broadResponse.text.trim().length < 100) {
+                    throw new Error("Could not extract enough content from the URL.");
                 }
+                extractedContent = broadResponse.text;
+            } else {
+                extractedContent = specificResponse.text;
             }
+            responseData = { text: extractedContent };
             
-            // Now generate the thread based on the extracted or provided content
-            const prompt = `Convert the following blog post content into a cohesive and engaging Twitter thread of exactly ${tweetCount} tweets. The thread should be numbered and each tweet should be formatted as a JSON object with a 'text' property. Do not include any other text or explanation. Blog post content: ${extractedContent}`;
+        } else if (task === 'thread') {
+            const prompt = `Convert the following blog post content into a cohesive and engaging Twitter thread of exactly ${tweetCount} tweets. The thread should be numbered and each tweet should be formatted as a JSON object with a 'text' property. Do not include any other text or explanation. Blog post content: ${content}`;
             const threadResponse = await callGeminiAPI(prompt, "application/json", GEMINI_API_KEY);
             responseData = threadResponse;
 
         } else if (task === 'image') {
-            // Generate an image using Perplexity API
             const imageResponse = await callPerplexityImageAPI(imagePrompt, PPLX_API_KEY);
             responseData = { imageUrl: imageResponse };
+
         } else {
             return res.status(400).json({ error: "Invalid task specified." });
         }
@@ -123,9 +120,16 @@ async function callPerplexityImageAPI(prompt, pplxApiKey) {
     });
 
     if (!response.ok) {
-        const error = await response.json();
-        console.error("Perplexity API error:", error);
-        throw new Error(error.message || "Perplexity image API failed");
+        let error;
+        try {
+            error = await response.json();
+            console.error("Perplexity API error:", error);
+            throw new Error(error.message || "Perplexity image API failed");
+        } catch (e) {
+            error = await response.text();
+            console.error("Perplexity API raw text error:", error);
+            throw new Error(`Perplexity image API failed with status ${response.status}. Raw response: ${error}`);
+        }
     }
 
     const result = await response.json();
