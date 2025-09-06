@@ -8,13 +8,17 @@ export default async function handler(req, res) {
 
     try {
         const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-        const HF_API_KEY = process.env.HF_API_KEY;
+        const PPLX_API_KEY = process.env.PPLX_API_KEY;
 
         if (!GEMINI_API_KEY) {
             return res.status(500).json({ error: "Gemini API key is not configured." });
         }
 
-        const { task, url, content, tweetCount } = req.body;
+        if (!PPLX_API_KEY) {
+            return res.status(500).json({ error: "Perplexity API key is not configured." });
+        }
+
+        const { task, url, content, tweetCount, imagePrompt } = req.body;
         let responseData = {};
 
         if (task === 'content') {
@@ -28,87 +32,62 @@ export default async function handler(req, res) {
                 const broadResponse = await callGeminiAPI(broadPrompt, "", GEMINI_API_KEY, true);
 
                 if (broadResponse.text.trim().length < 100) {
-                    return res.status(404).json({ error: "Could not find content from the provided URL. Please try pasting the content manually." });
+                    throw new Error("Could not extract enough content from the URL.");
                 }
                 extractedContent = broadResponse.text;
             } else {
                 extractedContent = specificResponse.text;
             }
-
-            responseData = { text: extractedContent };
-
-        } else if (task === 'thread') {
-            // Generate Twitter thread
-            const threadSystemPrompt = `
-                You are a world-class content strategist and copywriter for Twitter. 
-                Your task is to take a block of text and convert it into a well-structured, engaging Twitter thread. 
-                Follow these rules carefully:
-                1. The output must be exactly ${tweetCount} tweets.
-                2. Each tweet must be no more than 280 characters long.
-                3. The first tweet should be a hook that grabs attention.
-                4. The thread must flow logically from one tweet to the next.
-                5. Each tweet must begin with a number in the format 'x/${tweetCount}' (e.g., '1/5', '2/5', etc.).
-                6. The output should be only the tweets, separated by blank lines.
-            `;
-            const threadUserQuery = `
-                Convert the following blog post content into a ${tweetCount}-tweet Twitter thread. 
-                Ensure each tweet is a maximum of 280 characters and includes a tweet number (e.g., '1/5'):
-
-                ${content}
-            `;
-            const apiResponse = await callGeminiAPI(threadUserQuery, threadSystemPrompt, GEMINI_API_KEY);
-            responseData = { text: apiResponse.text };
+            
+            // Now generate the thread based on the extracted content
+            const prompt = `Convert the following blog post content into a cohesive and engaging Twitter thread of exactly ${tweetCount} tweets. The thread should be numbered and each tweet should be formatted as a JSON object with a 'text' property. Do not include any other text or explanation. Blog post content: ${extractedContent}`;
+            const threadResponse = await callGeminiAPI(prompt, "application/json", GEMINI_API_KEY);
+            responseData = threadResponse;
 
         } else if (task === 'image') {
-            // Generate image based on content
-            if (!HF_API_KEY) {
-                return res.status(500).json({ error: "Hugging Face API key is not configured." });
-            }
-
-            try {
-                const imageUrl = await callHuggingFaceImageAPI(content, HF_API_KEY);
-                responseData = { imageUrl };
-            } catch (err) {
-                console.error("HF API call failed:", err);
-                return res.status(500).json({ error: "Hugging Face image generation failed." });
-            }
-
+            // Generate an image using Perplexity API
+            const imageResponse = await callPerplexityImageAPI(imagePrompt, PPLX_API_KEY);
+            responseData = { imageUrl: imageResponse };
         } else {
             return res.status(400).json({ error: "Invalid task specified." });
         }
 
-        return res.status(200).json(responseData);
-
+        res.status(200).json(responseData);
     } catch (error) {
-        console.error("Serverless Function Error:", error);
-        return res.status(500).json({ error: error.message });
+        console.error("Server-side error:", error);
+        res.status(500).json({ error: error.message });
     }
 }
 
 // ---------- Gemini API Helper ----------
-async function callGeminiAPI(userPrompt, systemPrompt, apiKey, useSearch = false) {
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-    const payload = {
-        contents: [{ parts: [{ text: userPrompt }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
+async function callGeminiAPI(prompt, responseMimeType, apiKey, isContentExtraction = false) {
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    const body = {
+        contents: [{
+            parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+            responseMimeType: responseMimeType
+        }
     };
-    if (useSearch) {
-        payload.tools = [{ "google_search": {} }];
-    }
 
     const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body),
     });
 
     let result;
     try {
         result = await response.json();
     } catch (e) {
-        const textResult = await response.text();
-        console.error("API response was not valid JSON. Raw text:", textResult);
-        throw new Error("Gemini API call failed. Received a non-JSON response.");
+        if (isContentExtraction) {
+            return { text: 'Content not found' };
+        }
+        console.error("Failed to parse JSON response. Received a non-JSON response.");
+        throw new Error("Failed to parse JSON response. Received a non-JSON response.");
     }
 
     if (!response.ok) {
@@ -125,30 +104,31 @@ async function callGeminiAPI(userPrompt, systemPrompt, apiKey, useSearch = false
     return { text: result.candidates[0].content.parts[0].text };
 }
 
-// ---------- Hugging Face Image API Helper ----------
-async function callHuggingFaceImageAPI(prompt, hfApiKey) {
-    const apiUrl = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2";
+// ---------- Perplexity Image API Helper ----------
+async function callPerplexityImageAPI(prompt, pplxApiKey) {
+    const apiUrl = "https://api.perplexity.ai/images/v1";
 
     const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
-            "Authorization": `Bearer ${hfApiKey}`,
+            "Authorization": `Bearer ${pplxApiKey}`,
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
-            inputs: prompt,
-            options: { wait_for_model: true }
+            model: "stable-diffusion-xl",
+            prompt: prompt
         })
     });
 
     if (!response.ok) {
-        const error = await response.text();
-        console.error("HF API error:", error);
-        throw new Error("Hugging Face image API failed");
+        const error = await response.json();
+        console.error("Perplexity API error:", error);
+        throw new Error(error.message || "Perplexity image API failed");
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const base64Image = Buffer.from(arrayBuffer).toString("base64");
-
-    return `data:image/png;base64,${base64Image}`;
+    const result = await response.json();
+    if (!result.url) {
+        throw new Error("Perplexity API response missing image URL.");
+    }
+    return result.url;
 }
