@@ -127,21 +127,21 @@
         <div id="input-section" class="space-y-6">
             <div>
                 <label for="url-input" class="block text-sm font-semibold text-gray-700">Blog URL (Optional)</label>
-                <input type="url" id="url-input" placeholder="Enter blog URL (Medium, LinkedIn, etc.)" class="mt-1 block w-full rounded-xl border border-gray-700 shadow-sm p-3 focus:border-indigo-500 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                <input type="url" id="url-input" placeholder="Enter blog URL (Medium, LinkedIn, etc.)" class="mt-1 block w-full rounded-xl border-gray-300 shadow-sm p-3 focus:border-indigo-500 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
                 <p class="mt-1 text-xs text-gray-500">
                     Leave empty if pasting text below
                 </p>
             </div>
 
             <div class="relative flex items-center py-2">
-                <div class="flex-grow border-t border-gray-700"></div>
+                <div class="flex-grow border-t border-gray-300"></div>
                 <span class="flex-shrink mx-4 text-gray-400 text-sm">OR</span>
-                <div class="flex-grow border-t border-gray-700"></div>
+                <div class="flex-grow border-t border-gray-300"></div>
             </div>
 
             <div>
                 <label for="text-input" class="block text-sm font-semibold text-gray-700">Blog Content</label>
-                <textarea id="text-input" rows="10" placeholder="Paste your blog content here (up to 5000 words)" class="mt-1 block w-full rounded-xl border border-gray-700 shadow-sm p-3 resize-y focus:border-indigo-500 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"></textarea>
+                <textarea id="text-input" rows="10" placeholder="Paste your blog content here (up to 5000 words)" class="mt-1 block w-full rounded-xl border-gray-300 shadow-sm p-3 resize-y focus:border-indigo-500 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"></textarea>
                 <p id="word-count" class="mt-1 text-xs text-gray-500 text-right">0 / 5000 words</p>
             </div>
 
@@ -236,7 +236,6 @@
 
             // Function to generate content via the Serverless Function
             async function generateContent(payload) {
-                // IMPORTANT: This now calls our own Serverless Function, not the Gemini API directly.
                 const response = await fetch('/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -251,14 +250,12 @@
                 return await response.json();
             }
 
-
             // Update slider color
             function updateSliderColor() {
                 const value = (tweetCountInput.value - tweetCountInput.min) / (tweetCountInput.max - tweetCountInput.min) * 100;
                 tweetCountInput.style.setProperty('--slider-progress', `${value}%`);
             }
             updateSliderColor();
-
 
             tweetCountInput.addEventListener('input', (event) => {
                 tweetCountDisplay.textContent = event.target.value;
@@ -288,7 +285,6 @@
                     loadingIndicator.classList.add('hidden');
                 }
             }
-
 
             convertBtn.addEventListener('click', async () => {
                 const blogText = textInput.value.trim();
@@ -330,42 +326,37 @@
                         contentToProcess = contentResponse.text;
                     }
 
-                    // Start thread generation
                     setButtonLoadingState(true, 'Generating your thread...');
-
                     const threadPayload = {
                         task: 'thread',
                         content: contentToProcess,
                         tweetCount: tweetCount,
                     };
-                    
                     const threadResponse = await generateContent(threadPayload);
-                    let tweets = threadResponse.text.split('\n\n').map(t => t.trim()).filter(t => t.length > 0);
                     
-                    // Fallback to manually add numbering if the model failed to
-                    tweets = tweets.map((tweet, index) => {
-                        if (!tweet.startsWith(`${index + 1}/${tweetCount}`)) {
-                            return `${index + 1}/${tweetCount} ${tweet}`;
-                        }
-                        return tweet;
-                    });
-
-                    if (tweets.length !== tweetCount) {
-                        showMessage(`Generated thread has ${tweets.length} tweets instead of the requested ${tweetCount}. Truncating to ${tweetCount}.`);
+                    let tweets;
+                    try {
+                        const parsedResponse = JSON.parse(threadResponse.text);
+                        tweets = parsedResponse.map(tweet => tweet.text);
+                    } catch (e) {
+                        console.error("Failed to parse JSON from thread response. Using raw text.");
+                        showMessage("Warning: Thread formatting may be incorrect. Failed to parse JSON.");
+                        tweets = threadResponse.text.split('\n').filter(t => t.trim().length > 0);
+                    }
+                    
+                    if (tweets.length > tweetCount) {
                         tweets = tweets.slice(0, tweetCount);
                     }
-
-                    // Handle image generation if toggled
+                    
+                    // Handle image generation
                     if (shouldGenerateImage) {
                         imageLoadingText.classList.remove('hidden');
                         try {
-                            // --- CHANGE MADE HERE ---
-                            // Create a concise prompt for the image model from the first part of the blog content.
-                            const imagePrompt = contentToProcess.substring(0, 500); 
+                            const imagePrompt = tweets[0].substring(0, 500); 
                             
                             const imagePayload = {
                                 task: 'image',
-                                imagePrompt: imagePrompt, // Pass the new imagePrompt variable
+                                imagePrompt: imagePrompt,
                             };
                             const imageResponse = await generateContent(imagePayload);
                             generatedImage.src = imageResponse.imageUrl;
@@ -386,7 +377,7 @@
                         tweetCard.className = 'tweet-card p-4 rounded-xl bg-white shadow-md border border-gray-200 flex flex-col justify-between';
                         tweetCard.setAttribute('contenteditable', 'true');
                         tweetCard.innerHTML = `
-                            <p class="text-gray-800">${tweet}</p>
+                            <p class="text-gray-800">${index + 1}/${tweets.length} ${tweet}</p>
                             <button class="copy-tweet-btn mt-4 ml-auto py-2 px-4 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-xs font-semibold transition duration-200">Copy Tweet</button>
                         `;
                         tweetContainer.appendChild(tweetCard);
